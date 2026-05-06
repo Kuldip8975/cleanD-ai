@@ -943,8 +943,15 @@ Target column: {tgt if tgt else 'None selected'}
                 st.warning("Enter a question first.")
             else:
                 try:
-                    import anthropic
-                    client = anthropic.Anthropic()
+                    from groq import Groq
+                    import os
+
+                    api_key = st.secrets.get("GROQ_API_KEY", None) or os.environ.get("GROQ_API_KEY", None)
+                    if not api_key:
+                        st.error("GROQ_API_KEY not found. Add it to your Streamlit secrets or environment variables.")
+                        st.stop()
+
+                    client = Groq(api_key=api_key)
 
                     prompt = f"""You are a senior data scientist reviewing a dataset. Here is the dataset context:
 
@@ -955,17 +962,17 @@ User question: {user_q}
 Provide a concise, actionable response focused on data science best practices. Use bullet points where helpful. Be specific to the numbers provided."""
 
                     with st.spinner("Analyzing..."):
-                        response = client.messages.create(
-                            model="claude-sonnet-4-20250514",
+                        response = client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
                             max_tokens=1200,
                             messages=[{"role": "user", "content": prompt}]
                         )
-                    answer = response.content[0].text
+                    answer = response.choices[0].message.content
                     st.session_state.ai_insights = {"q": user_q, "a": answer}
 
                 except Exception as e:
                     st.error(f"AI unavailable: {e}")
-                    st.info("Make sure your ANTHROPIC_API_KEY environment variable is set.")
+                    st.info("Make sure your GROQ_API_KEY is set in Streamlit secrets.")
 
         if st.session_state.ai_insights:
             ins = st.session_state.ai_insights
