@@ -8,3 +8,4 @@ imbalanced-learn
 plotly
 fpdf2
 anthropic
+groq
