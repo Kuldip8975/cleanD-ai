@@ -255,7 +255,7 @@ for k, v in defaults.items():
 st.markdown("""
 <div class="main-header">
   <h1>⚡ CleanD AI</h1>
-  <p>// smart dataset CleanD AI + preprocessor + ml evaluator for data scientists</p>
+  <p>// smart dataset profiler + preprocessor + ml evaluator for data scientists</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -267,7 +267,15 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"], label_visibility="collapsed")
     if uploaded_file:
         df_new = pd.read_csv(uploaded_file)
-        df_new = df_new.apply(pd.to_numeric, errors='ignore')
+
+        # FIX: pd.to_numeric with errors='ignore' removed in Pandas 2.x
+        # Safe replacement that works on all versions
+        for col in df_new.columns:
+            try:
+                df_new[col] = pd.to_numeric(df_new[col])
+            except (ValueError, TypeError):
+                pass
+
         if st.session_state.uploaded_df is None or uploaded_file.name != st.session_state.get("fname", ""):
             st.session_state.uploaded_df = df_new
             st.session_state.df_processed = None
@@ -315,7 +323,7 @@ with st.sidebar:
                     st.warning(f"PDF unavailable: {e}")
 
 # ─────────────────────────────────────────────────────────────────
-# MAIN CONTENT
+# MAIN CONTENT GUARD
 # ─────────────────────────────────────────────────────────────────
 if st.session_state.uploaded_df is None:
     st.markdown("""
@@ -331,11 +339,12 @@ if st.session_state.uploaded_df is None:
     """, unsafe_allow_html=True)
     st.stop()
 
+# FIX: read from session state only — single source of truth
 df = st.session_state.uploaded_df
 target_col = st.session_state.target_col
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊  CleanD AI", "⚙️  Preprocess", "🔬  Compare", "🤖  ML Models", "💡  AI Insights"
+    "📊  Profile", "⚙️  Preprocess", "🔬  Compare", "🤖  ML Models", "💡  AI Insights"
 ])
 
 PLOT_THEME = dict(
@@ -351,12 +360,12 @@ PLOT_THEME = dict(
 # ═══════════════════════════════════════════════════════════════
 with tab1:
     st.markdown('<div class="section-label">// overview</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Dataset CleanD AI</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Dataset Profile</div>', unsafe_allow_html=True)
 
-    # Metric cards
     num_missing = int(df.isna().sum().sum())
     num_dupes = int(df.duplicated().sum())
     mem_kb = round(df.memory_usage(deep=True).sum() / 1024, 2)
+
     st.markdown(f"""
     <div class="metric-row">
         <div class="metric-card">
@@ -371,7 +380,7 @@ with tab1:
             <div class="label">Missing Values</div>
             <div class="value">{num_missing:,}</div>
             <div class="delta {'delta-neg' if num_missing > 0 else 'delta-pos'}">
-                {round(num_missing / (df.shape[0]*df.shape[1])*100, 1)}% of cells
+                {round(num_missing / max(df.shape[0]*df.shape[1], 1)*100, 1)}% of cells
             </div>
         </div>
         <div class="metric-card">
@@ -409,7 +418,7 @@ with tab1:
         st.dataframe(df[numeric_cols].describe().T.round(4), use_container_width=True)
     st.markdown("---")
 
-    # Column visualizations — Plotly
+    # Column visualizations
     st.markdown('<div class="section-label">// distributions</div>', unsafe_allow_html=True)
     cols_vis = st.columns(2)
     for i, col in enumerate(df.columns[:16]):
@@ -437,7 +446,7 @@ with tab1:
     # Correlation heatmap
     st.markdown('<div class="section-label">// correlation matrix</div>', unsafe_allow_html=True)
     df_enc = df.copy()
-    for c in df_enc.select_dtypes(include=['object','category']).columns:
+    for c in df_enc.select_dtypes(include=['object', 'category']).columns:
         try:
             df_enc[c] = LabelEncoder().fit_transform(df_enc[c].astype(str))
         except Exception:
@@ -496,7 +505,11 @@ with tab2:
                 corr_threshold = st.slider("Drop threshold", 0.0, 0.5, 0.05, 0.01, key="pp_corr_thresh")
 
         st.markdown("**🔧 Missing Values**")
-        handle_missing = st.selectbox("Strategy", ["None", "Drop Rows", "Fill Values", "KNN Impute", "Iterative Impute"], key="pp_miss")
+        handle_missing = st.selectbox(
+            "Strategy",
+            ["None", "Drop Rows", "Fill Values", "KNN Impute", "Iterative Impute"],
+            key="pp_miss"
+        )
         num_fill = None
         if handle_missing == "Fill Values":
             num_fill = st.radio("Numeric fill", ["Mean", "Median"], horizontal=True, key="pp_fill")
@@ -506,22 +519,29 @@ with tab2:
 
     with c2:
         st.markdown("**🚫 Outlier Handling**")
-        outlier_method = st.selectbox("Method", ["None", "IQR Method", "Z-Score Method", "Isolation Forest", "Winsorization"], key="pp_out")
+        outlier_method = st.selectbox(
+            "Method",
+            ["None", "IQR Method", "Z-Score Method", "Isolation Forest", "Winsorization"],
+            key="pp_out"
+        )
 
         st.markdown("**📊 Normalization**")
-        normalization = st.selectbox("Technique",
+        normalization = st.selectbox(
+            "Technique",
             ["None", "Min-Max Scaler", "Standard Scaler", "Robust Scaler", "Z-Score (Custom)", "Log Transform"],
-            key="pp_norm")
+            key="pp_norm"
+        )
 
         st.markdown("**🔡 Encoding**")
-        encoding_type = st.selectbox("Technique",
+        encoding_type = st.selectbox(
+            "Technique",
             ["None", "Label Encoding", "One-Hot Encoding", "Ordinal Encoding"],
-            key="pp_enc")
+            key="pp_enc"
+        )
 
     st.markdown("---")
     if st.button("⚡ Run Preprocessing Pipeline", use_container_width=True, key="run_pp"):
         progress = st.progress(0)
-        status = st.empty()
 
         def update(step, total):
             progress.progress(step / total)
@@ -577,7 +597,6 @@ with tab3:
     else:
         df_proc = st.session_state.df_processed
 
-        # Summary comparison table
         def quick_stats(d):
             return {
                 "Rows": d.shape[0],
@@ -596,19 +615,13 @@ with tab3:
         for key in s_orig:
             orig_v, proc_v = s_orig[key], s_proc[key]
             diff = proc_v - orig_v if isinstance(orig_v, (int, float)) else "—"
-            if key == "Missing Values":
-                tag = "compare-better" if diff <= 0 else "compare-worse"
-            elif key in ("Rows",):
-                tag = "compare-same"
-            else:
-                tag = "compare-same"
             compare_rows.append({"Metric": key, "Original": orig_v, "Processed": proc_v, "Δ": diff})
 
         compare_df = pd.DataFrame(compare_rows)
         st.dataframe(compare_df, use_container_width=True, hide_index=True)
         st.markdown("---")
 
-        # Distribution comparison for numeric columns
+        # Distribution comparison
         st.markdown('<div class="section-label">// distribution comparison</div>', unsafe_allow_html=True)
         common_num = [c for c in df_proc.select_dtypes(include=np.number).columns if c in df.columns]
 
@@ -626,20 +639,18 @@ with tab3:
             fig.update_xaxes(title_text=sel_col)
             st.plotly_chart(fig, use_container_width=True)
 
-            # Box plot comparison
             try:
                 fig2 = go.Figure()
                 fig2.add_trace(go.Box(y=df[sel_col].dropna(), name="Before",
                                       marker_color="#ef4444", boxmean=True))
                 fig2.add_trace(go.Box(y=df_proc[sel_col].dropna(), name="After",
                                       marker_color="#22c55e", boxmean=True))
-                fig2.update_layout(**PLOT_THEME, height=320,
-                                   title=f"Box Plot — {sel_col}")
+                fig2.update_layout(**PLOT_THEME, height=320, title=f"Box Plot — {sel_col}")
                 st.plotly_chart(fig2, use_container_width=True)
             except Exception:
                 pass
 
-        # Imbalance handling section
+        # Class balance
         st.markdown("---")
         st.markdown('<div class="section-label">// class balance</div>', unsafe_allow_html=True)
         if target_col and target_col in df_proc.columns:
@@ -664,6 +675,7 @@ with tab3:
                 if msg == "Success":
                     st.session_state.df_processed = df_bal
                     st.success(f"✅ {bal_method} applied. New shape: {df_bal.shape}")
+                    st.rerun()
                 else:
                     st.error(f"❌ {msg}")
         else:
@@ -686,7 +698,6 @@ with tab3:
                     pca_result = pca.fit_transform(pca_data)
                     pca_df = pd.DataFrame(pca_result, columns=[f"PC{i+1}" for i in range(n_comp)])
 
-                    # Explained variance
                     var_df = pd.DataFrame({
                         "Component": [f"PC{i+1}" for i in range(n_comp)],
                         "Explained Variance %": np.round(pca.explained_variance_ratio_ * 100, 2),
@@ -702,20 +713,18 @@ with tab3:
                     fig_var.update_layout(**PLOT_THEME, height=320, title="PCA Explained Variance")
                     st.plotly_chart(fig_var, use_container_width=True)
 
-                    # 2D scatter
-                    scatter_kwargs = dict(x=pca_df["PC1"], y=pca_df["PC2"])
                     if pca_target and pca_target in df_proc.columns:
                         hue = df_proc.loc[pca_data.index, pca_target].reset_index(drop=True).astype(str)
                         fig_sc = px.scatter(x=pca_df["PC1"], y=pca_df["PC2"], color=hue,
-                                            title="PCA — PC1 vs PC2", labels={"x":"PC1","y":"PC2"},
+                                            title="PCA — PC1 vs PC2", labels={"x": "PC1", "y": "PC2"},
                                             color_discrete_sequence=px.colors.qualitative.Bold)
                     else:
                         fig_sc = px.scatter(x=pca_df["PC1"], y=pca_df["PC2"],
-                                            title="PCA — PC1 vs PC2", labels={"x":"PC1","y":"PC2"})
+                                            title="PCA — PC1 vs PC2", labels={"x": "PC1", "y": "PC2"})
                     fig_sc.update_layout(**PLOT_THEME, height=400)
                     st.plotly_chart(fig_sc, use_container_width=True)
 
-                    # Download PCA
+                    # FIX: download button inside try block (after success)
                     if pca_target and pca_target in df_proc.columns:
                         pca_df[pca_target] = df_proc.loc[pca_data.index, pca_target].values
                     csv_pca = pca_df.to_csv(index=False).encode()
@@ -738,127 +747,134 @@ with tab4:
         st.info("Select a target column in the sidebar.")
     else:
         df_ml = st.session_state.df_processed
-        task_type = detect_task_type(df_ml[target_col]) if target_col in df_ml.columns else "unknown"
-        st.markdown(f'<div class="log-entry">▸ Detected task: <strong>{task_type.upper()}</strong> — target: <strong>{target_col}</strong></div>',
-                    unsafe_allow_html=True)
 
-        model_pool = CLASSIFIERS if task_type == "classification" else REGRESSORS
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            selected_models = st.multiselect(
-                "Select models to train",
-                options=list(model_pool.keys()),
-                default=list(model_pool.keys())[:3],
-                key="ml_model_select"
+        # FIX: guard against target_col missing from processed df after encoding
+        if target_col not in df_ml.columns:
+            st.warning(f"⚠️ Target column '{target_col}' was removed during preprocessing (e.g. dropped or encoded away). Please re-run preprocessing.")
+        else:
+            task_type = detect_task_type(df_ml[target_col])
+            st.markdown(
+                f'<div class="log-entry">▸ Detected task: <strong>{task_type.upper()}</strong> — target: <strong>{target_col}</strong></div>',
+                unsafe_allow_html=True
             )
-        with c2:
-            test_size = st.slider("Test split %", 10, 40, 20, 5, key="ml_test_size") / 100
 
-        if st.button("🚀 Train & Evaluate Models", use_container_width=True, key="train_btn"):
-            if not selected_models:
-                st.warning("Select at least one model.")
-            else:
-                with st.spinner("Training models..."):
-                    results, err = train_and_evaluate(df_ml, target_col, selected_models, test_size)
-                if err:
-                    st.error(err)
+            model_pool = CLASSIFIERS if task_type == "classification" else REGRESSORS
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                selected_models = st.multiselect(
+                    "Select models to train",
+                    options=list(model_pool.keys()),
+                    default=list(model_pool.keys())[:3],
+                    key="ml_model_select"
+                )
+            with c2:
+                test_size = st.slider("Test split %", 10, 40, 20, 5, key="ml_test_size") / 100
+
+            if st.button("🚀 Train & Evaluate Models", use_container_width=True, key="train_btn"):
+                if not selected_models:
+                    st.warning("Select at least one model.")
                 else:
-                    st.session_state.ml_results = results
-                    st.success("✅ Training complete!")
+                    with st.spinner("Training models..."):
+                        results, err = train_and_evaluate(df_ml, target_col, selected_models, test_size)
+                    if err:
+                        st.error(err)
+                    else:
+                        st.session_state.ml_results = results
+                        st.success("✅ Training complete!")
 
-        if st.session_state.ml_results:
-            results = st.session_state.ml_results
-            st.markdown("---")
-            st.markdown('<div class="section-label">// model results</div>', unsafe_allow_html=True)
-
-            # Collect metrics for comparison chart
-            metric_rows = []
-            for name, res in results.items():
-                if "error" in res:
-                    st.error(f"{name}: {res['error']}")
-                    continue
-                m = res["metrics"]
-                row = {"Model": name}
-                for k, v in m.items():
-                    if k not in ("Report", "Confusion Matrix", "Feature Importance"):
-                        row[k] = v
-                metric_rows.append(row)
-
-                # Model card
-                metric_html = ""
-                for k, v in m.items():
-                    if k not in ("Report", "Confusion Matrix", "Feature Importance"):
-                        metric_html += f'<span class="model-metric">{k}: {v}</span>'
-
-                report_html = ""
-                if "Report" in m:
-                    report_html = f'<details><summary style="cursor:pointer; color:#64748b; font-family:JetBrains Mono; font-size:0.75rem; margin-top:0.5rem;">▸ Classification Report</summary><pre style="font-size:0.72rem; color:#94a3b8; background:#0d1117; padding:0.8rem; border-radius:4px; overflow-x:auto;">{m["Report"]}</pre></details>'
-
-                st.markdown(f"""
-                <div class="model-card">
-                    <div class="model-name">◆ {name}</div>
-                    {metric_html}
-                    {report_html}
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Comparison bar chart
-            if len(metric_rows) > 1:
+            if st.session_state.ml_results:
+                results = st.session_state.ml_results
                 st.markdown("---")
-                st.markdown('<div class="section-label">// model comparison</div>', unsafe_allow_html=True)
-                metrics_df = pd.DataFrame(metric_rows)
-                numeric_metrics = [c for c in metrics_df.columns if c != "Model" and metrics_df[c].apply(lambda x: isinstance(x, (int, float))).all()]
-                if numeric_metrics:
-                    sel_metric = st.selectbox("Metric to compare", numeric_metrics, key="compare_metric")
-                    fig_cmp = px.bar(metrics_df, x="Model", y=sel_metric,
-                                     color="Model", title=f"Model Comparison — {sel_metric}",
-                                     color_discrete_sequence=px.colors.qualitative.Bold,
-                                     text_auto=True)
-                    fig_cmp.update_layout(**PLOT_THEME, height=360, showlegend=False)
-                    fig_cmp.update_traces(textposition="outside")
-                    st.plotly_chart(fig_cmp, use_container_width=True)
+                st.markdown('<div class="section-label">// model results</div>', unsafe_allow_html=True)
 
-            # Feature importance
-            st.markdown("---")
-            st.markdown('<div class="section-label">// feature importance</div>', unsafe_allow_html=True)
-            fi_df = get_feature_importance_df(results)
-            if fi_df is not None:
-                top_n = min(20, len(fi_df))
-                fi_plot = fi_df["Average"].head(top_n).sort_values(ascending=True)
-                fig_fi = px.bar(x=fi_plot.values, y=fi_plot.index, orientation="h",
-                                title=f"Top {top_n} Features by Average Importance",
-                                color=fi_plot.values,
-                                color_continuous_scale="Blues", text_auto=True)
-                fig_fi.update_layout(**PLOT_THEME, height=max(320, top_n * 28), showlegend=False)
-                st.plotly_chart(fig_fi, use_container_width=True)
+                metric_rows = []
+                for name, res in results.items():
+                    if "error" in res:
+                        st.error(f"{name}: {res['error']}")
+                        continue
+                    m = res["metrics"]
+                    row = {"Model": name}
+                    for k, v in m.items():
+                        if k not in ("Report", "Confusion Matrix", "Feature Importance"):
+                            row[k] = v
+                    metric_rows.append(row)
 
-                # Per-model importance breakdown
-                if len(fi_df.columns) > 2:
-                    with st.expander("View per-model feature importance breakdown"):
-                        model_cols = [c for c in fi_df.columns if c != "Average"]
-                        fig_multi = go.Figure()
-                        for mc in model_cols:
-                            top_feats = fi_df[mc].dropna().head(10).sort_values(ascending=True)
-                            fig_multi.add_trace(go.Bar(x=top_feats.values, y=top_feats.index,
-                                                       orientation="h", name=mc))
-                        fig_multi.update_layout(**PLOT_THEME, barmode="group", height=420,
-                                               title="Feature Importance by Model")
-                        st.plotly_chart(fig_multi, use_container_width=True)
-            else:
-                st.info("No feature importances available for selected models.")
+                    metric_html = ""
+                    for k, v in m.items():
+                        if k not in ("Report", "Confusion Matrix", "Feature Importance"):
+                            metric_html += f'<span class="model-metric">{k}: {v}</span>'
 
-            # Confusion matrix heatmaps (classification)
-            for name, res in results.items():
-                if "error" in res:
-                    continue
-                cm = res["metrics"].get("Confusion Matrix")
-                if cm:
-                    with st.expander(f"Confusion Matrix — {name}"):
-                        fig_cm = px.imshow(cm, text_auto=True, title=f"{name} — Confusion Matrix",
-                                           color_continuous_scale="Blues",
-                                           labels=dict(x="Predicted", y="Actual"))
-                        fig_cm.update_layout(**PLOT_THEME, height=380)
-                        st.plotly_chart(fig_cm, use_container_width=True)
+                    report_html = ""
+                    if "Report" in m:
+                        report_html = f'<details><summary style="cursor:pointer; color:#64748b; font-family:JetBrains Mono; font-size:0.75rem; margin-top:0.5rem;">▸ Classification Report</summary><pre style="font-size:0.72rem; color:#94a3b8; background:#0d1117; padding:0.8rem; border-radius:4px; overflow-x:auto;">{m["Report"]}</pre></details>'
+
+                    st.markdown(f"""
+                    <div class="model-card">
+                        <div class="model-name">◆ {name}</div>
+                        {metric_html}
+                        {report_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # Comparison bar chart
+                if len(metric_rows) > 1:
+                    st.markdown("---")
+                    st.markdown('<div class="section-label">// model comparison</div>', unsafe_allow_html=True)
+                    metrics_df = pd.DataFrame(metric_rows)
+                    numeric_metrics = [
+                        c for c in metrics_df.columns
+                        if c != "Model" and metrics_df[c].apply(lambda x: isinstance(x, (int, float))).all()
+                    ]
+                    if numeric_metrics:
+                        sel_metric = st.selectbox("Metric to compare", numeric_metrics, key="compare_metric")
+                        fig_cmp = px.bar(metrics_df, x="Model", y=sel_metric,
+                                         color="Model", title=f"Model Comparison — {sel_metric}",
+                                         color_discrete_sequence=px.colors.qualitative.Bold,
+                                         text_auto=True)
+                        fig_cmp.update_layout(**PLOT_THEME, height=360, showlegend=False)
+                        fig_cmp.update_traces(textposition="outside")
+                        st.plotly_chart(fig_cmp, use_container_width=True)
+
+                # Feature importance
+                st.markdown("---")
+                st.markdown('<div class="section-label">// feature importance</div>', unsafe_allow_html=True)
+                fi_df = get_feature_importance_df(results)
+                if fi_df is not None:
+                    top_n = min(20, len(fi_df))
+                    fi_plot = fi_df["Average"].head(top_n).sort_values(ascending=True)
+                    fig_fi = px.bar(x=fi_plot.values, y=fi_plot.index, orientation="h",
+                                    title=f"Top {top_n} Features by Average Importance",
+                                    color=fi_plot.values,
+                                    color_continuous_scale="Blues", text_auto=True)
+                    fig_fi.update_layout(**PLOT_THEME, height=max(320, top_n * 28), showlegend=False)
+                    st.plotly_chart(fig_fi, use_container_width=True)
+
+                    if len(fi_df.columns) > 2:
+                        with st.expander("View per-model feature importance breakdown"):
+                            model_cols = [c for c in fi_df.columns if c != "Average"]
+                            fig_multi = go.Figure()
+                            for mc in model_cols:
+                                top_feats = fi_df[mc].dropna().head(10).sort_values(ascending=True)
+                                fig_multi.add_trace(go.Bar(x=top_feats.values, y=top_feats.index,
+                                                           orientation="h", name=mc))
+                            fig_multi.update_layout(**PLOT_THEME, barmode="group", height=420,
+                                                   title="Feature Importance by Model")
+                            st.plotly_chart(fig_multi, use_container_width=True)
+                else:
+                    st.info("No feature importances available for selected models.")
+
+                # Confusion matrix heatmaps
+                for name, res in results.items():
+                    if "error" in res:
+                        continue
+                    cm = res["metrics"].get("Confusion Matrix")
+                    if cm:
+                        with st.expander(f"Confusion Matrix — {name}"):
+                            fig_cm = px.imshow(cm, text_auto=True, title=f"{name} — Confusion Matrix",
+                                               color_continuous_scale="Blues",
+                                               labels=dict(x="Predicted", y="Actual"))
+                            fig_cm.update_layout(**PLOT_THEME, height=380)
+                            st.plotly_chart(fig_cm, use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -873,20 +889,19 @@ with tab5:
     else:
         df_ai = st.session_state.df_processed if st.session_state.df_processed is not None else df
 
-        # Build context summary for Claude
-        def build_context(df_orig, df_clean, target, ml_res):
+        def build_context(df_orig, df_clean, tgt, ml_res):
             num_cols = df_clean.select_dtypes(include=np.number).columns.tolist()
             cat_cols = df_clean.select_dtypes(include='object').columns.tolist()
             missing = df_clean.isna().sum().sum()
             dupes = df_clean.duplicated().sum()
 
-            ctx = f"""Dataset: {st.session_state.get('fname','unknown')}
+            ctx = f"""Dataset: {st.session_state.get('fname', 'unknown')}
 Shape: {df_clean.shape[0]} rows × {df_clean.shape[1]} cols (original: {df_orig.shape[0]} × {df_orig.shape[1]})
-Numeric columns ({len(num_cols)}): {', '.join(num_cols[:15])}{'...' if len(num_cols)>15 else ''}
-Categorical columns ({len(cat_cols)}): {', '.join(cat_cols[:10])}{'...' if len(cat_cols)>10 else ''}
+Numeric columns ({len(num_cols)}): {', '.join(num_cols[:15])}{'...' if len(num_cols) > 15 else ''}
+Categorical columns ({len(cat_cols)}): {', '.join(cat_cols[:10])}{'...' if len(cat_cols) > 10 else ''}
 Missing values: {missing}
 Duplicates: {dupes}
-Target column: {target if target else 'None selected'}
+Target column: {tgt if tgt else 'None selected'}
 """
             if num_cols:
                 stats = df_clean[num_cols[:8]].describe().round(3).to_string()
